@@ -328,6 +328,33 @@ void trisect(triangle T){
         trisect(T3);
     }
 }
+//Returns the point closest to the center of a series of points
+point center_of_gravity(std::vector<point> points){
+    GLint x_sum = 0;
+    GLint y_sum = 0;
+    point average;
+    int n = points.size();
+    //Sum up x and y coordinates of the set of vertices
+    for(int i=0;i<n;i++){
+        x_sum += points[i].x;
+        y_sum += points[i].y;
+    }
+    //Average point in set of vertices
+    average.x = x_sum/n;
+    average.y = y_sum/n;
+    //Find closest point to average
+    point closest = points[0];
+    std::cout<<"Made it!"<<std::endl;
+    int min_dist = std::sqrt((points[0].x-average.x)^2 + (points[0].y-average.y)^2);
+    for(int i=0;i<n;i++){
+        int d = std::sqrt((points[i].x-average.x)^2 + (points[i].y-average.y)^2);
+        if(d<min_dist){
+            min_dist = d;
+            closest = points[i];
+        }
+    }
+    return closest;
+}
 //Calculate a triangulation of the existing vertices on the screen
 void triangulation(){
     run_quick_hull(global.vertices);
@@ -341,8 +368,8 @@ void triangulation(){
     }
 
     points = not_in_hull(points);
-    int k = (int)(rand()%points.size());
-    point P = points[k];
+    point P = center_of_gravity(points);
+    //int k = (int)(rand()%points.size());
     for(int i=0;i<global.convex_hull.size();i++){
         edge e1 = global.convex_hull[i];
         /*edge e2(P,e1.p1);
@@ -350,6 +377,7 @@ void triangulation(){
         triangle T(e1.p1,e1.p2,P);
         trisect(T);
     }
+    std::cout<<"Center of gravity: "<<"("<<P.x<<","<<P.y<<")"<<std::endl;
 }
 
 //Remove all vertices and convex hull edges from screen
