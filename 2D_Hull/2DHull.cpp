@@ -200,6 +200,7 @@ void quick_Hull(std::vector<point> points, point P1,point P2){
             int dist = signed_fast_distance(e,points[i]);
             if(dist == 0 && isBetween(e,points[i])){
                 pmax = points[i];
+                ind = i;
             }
         }
     }

@@ -21,10 +21,12 @@ COSC 3P98 Assignment #2
 #include <ctime>
 //For max and min
 #include <cmath>
-
+#include <unistd.h>
+#include <chrono>
+#include <thread>
 
 //Menu options
-enum{ MENU_RAND, MENU_TRIANGULATE, MENU_ADD_100, MENU_RESET, MENU_QUIT};
+enum{ MENU_RAND, MENU_LATTICE, MENU_CLEANUP, MENU_TRIANGULATE, MENU_ADD_100, MENU_RESET, MENU_QUIT};
 
 //Points on the window
 class point{
@@ -79,13 +81,15 @@ class triangle{
 
 //the global structure
 typedef struct {
-    GLfloat screen_width = 1920.0/2;
-    GLfloat screen_height = 1080.0/2;
+    GLint screen_width = 1920/2;
+    GLint screen_height = 1080/2;
     int numVertices = 100; // A default number of vertices
     bool pressedM = false; //Has the user started setting vertices with the mouse yet
+    int triangles_restructured = 0; //Number of triangles restructured by triangulation clean up
     std::vector<point> vertices; // The list of vertices
     std::vector<edge> convex_hull; //The edges of the convex hull
-    std::vector<triangle> trisection;
+    std::vector<triangle> trisection; //The triangles of the triangulation
+    int busysleep = 100;
 } glob;
 glob global;
 
@@ -223,7 +227,7 @@ point min_x(std::vector<point> vertices){
 
 //Helper function for quick hull, to figure out if a point is between the two edges of a line
 bool isBetween(edge e, point p){
-    return p.x>std::min(e.p1.x,e.p2.x) && p.x < std::max(e.p1.x,e.p2.x) && p.y>std::min(e.p1.y,e.p2.y) && p.y < std::max(e.p1.y,e.p2.y);
+    return (p.x>std::min(e.p1.x,e.p2.x) && p.x < std::max(e.p1.x,e.p2.x)) && (p.y>std::min(e.p1.y,e.p2.y) && p.y < std::max(e.p1.y,e.p2.y));
 }
 
 //Finds the convex hull of the existing points on the screen using the divide and conquer "quick hull" algorithm
@@ -250,6 +254,7 @@ void quick_Hull(std::vector<point> points, point P1,point P2){
             int dist = signed_fast_distance(e,points[i]);
             if(dist == 0 && isBetween(e,points[i])){
                 pmax = points[i];
+                ind = i;
             }
         }
     }
@@ -296,6 +301,7 @@ std::vector<point> not_in_hull(std::vector<point> points){
 //Divide a triangle into smaller triangles if it has an interior point
 void trisect(triangle T){
     bool no_interior_points = true;
+    bool no_edge_points = true;
     //Edges of triangle
     edge e1 = T.e1;
     edge e2 = T.e2;
@@ -315,18 +321,74 @@ void trisect(triangle T){
     }
     //If no interior point, then add triangle to trisection
     if(no_interior_points){
+        for(point p_edge : global.vertices){
+            GLint d1 = signed_fast_distance(e1,p_edge);
+            GLint d2 = signed_fast_distance(e2,p_edge);
+            GLint d3 = signed_fast_distance(e3,p_edge);
+            if(d1 == 0 && isBetween(e1,p_edge)){
+                no_edge_points = false;
+                P = p_edge;
+            }
+            else if(d2 == 0 && isBetween(e2,p_edge)){
+                no_edge_points = false;
+                P = p_edge;
+            }
+            else if(d3 == 0 && isBetween(e3,p_edge)){
+                no_edge_points = false;
+                P = p_edge;
+            }
+        }
+    }
+    if(no_edge_points){
         global.trisection.push_back(T);
     }
     //If there is an interior point, divide triangle into three smaller triangles using interior point
     else{
-        triangle T1(e1.p1,e1.p2,P);
-        triangle T2(e2.p1,e2.p2,P);
-        triangle T3(e3.p1,e3.p2,P);
-        //Trisect each new triangle
-        trisect(T1);
-        trisect(T2);
-        trisect(T3);
+        if(!no_edge_points){
+            if(isBetween(e1,P)){
+                point p3;
+                if(T.a != e1.p1 && T.a != e1.p2) p3 = T.a;
+                if(T.b != e1.p1 && T.b != e1.p2) p3 = T.b;
+                else p3 = T.c;
+                triangle T1(e1.p1,P,p3);
+                triangle T2(e1.p2,P,p3);
+                trisect(T1);
+                trisect(T2);
+            }
+            else if(isBetween(e2,P)){
+                point p3;
+                if(T.a != e2.p1 && T.a != e2.p2) p3 = T.a;
+                if(T.b != e2.p1 && T.b != e2.p2) p3 = T.b;
+                else p3 = T.c;
+                triangle T1(e2.p1,P,p3);
+                triangle T2(e2.p2,P,p3);
+                trisect(T1);
+                trisect(T2);
+            }
+            else if(isBetween(e3,P)){
+                point p3;
+                if(T.a != e3.p1 && T.a != e3.p2) p3 = T.a;
+                if(T.b != e3.p1 && T.b != e3.p2) p3 = T.b;
+                else p3 = T.c;
+                triangle T1(e3.p1,P,p3);
+                triangle T2(e3.p2,P,p3);
+                trisect(T1);
+                trisect(T2);
+            }
+        }
+        else{
+            triangle T1(e1.p1,e1.p2,P);
+            triangle T2(e2.p1,e2.p2,P);
+            triangle T3(e3.p1,e3.p2,P);
+            //Trisect each new triangle
+            trisect(T1);
+            trisect(T2);
+            trisect(T3);
+        }
     }
+}
+int euclid_dist(point a, point b){
+    return std::sqrt((b.x-a.x)^2 + (b.y-a.y)^2);
 }
 //Returns the point closest to the center of a series of points
 point center_of_gravity(std::vector<point> points){
@@ -342,12 +404,12 @@ point center_of_gravity(std::vector<point> points){
     //Average point in set of vertices
     average.x = x_sum/n;
     average.y = y_sum/n;
-    //Find closest point to average
+    average.x = global.screen_width/2;
+    average.y = global.screen_height/2;
     point closest = points[0];
-    std::cout<<"Made it!"<<std::endl;
-    int min_dist = std::sqrt((points[0].x-average.x)^2 + (points[0].y-average.y)^2);
+    int min_dist = (points[0].x-average.x)^2 + (points[0].y-average.y)^2;
     for(int i=0;i<n;i++){
-        int d = std::sqrt((points[i].x-average.x)^2 + (points[i].y-average.y)^2);
+        int d = (points[i].x-average.x)^2 + (points[i].y-average.y)^2;
         if(d<min_dist){
             min_dist = d;
             closest = points[i];
@@ -379,6 +441,130 @@ void triangulation(){
     }
     std::cout<<"Center of gravity: "<<"("<<P.x<<","<<P.y<<")"<<std::endl;
 }
+//Returns true if edge is in triangle
+bool in_triangle(edge e, triangle T){
+    if(e == T.e1){
+        return true;
+    }if(e == T.e2){
+        return true;
+    }if(e == T.e3){
+        return true;
+    }
+    else{
+        return false;
+    }
+}
+//Check if new edge makes a triangle with a smaller weight
+std::vector<triangle> minimum_weight(edge shared, triangle T1, triangle T2){
+    //Find possible new shared edge that may result in smaller weight
+    edge new_edge;
+    if(T1.a != shared.p1 && T1.a != shared.p2){
+        new_edge.p1 = T1.a;
+    }
+    else if(T1.b != shared.p1 && T1.b != shared.p2){
+        new_edge.p1 = T1.b;
+    }
+    else if(T1.c != shared.p1 && T1.c != shared.p2){
+        new_edge.p1 = T1.c;
+    }
+
+    if(T2.a != shared.p1 && T2.a != shared.p2){
+        new_edge.p2 = T2.a;
+    }
+    else if(T2.b != shared.p1 && T2.b != shared.p2){
+        new_edge.p2 = T2.b;
+    }
+    else if(T2.c != shared.p1 && T2.c != shared.p2){
+        new_edge.p2 = T2.c;
+    }
+    //Distance between points of current shared edge of T1 and T2
+    int d1 = euclid_dist(shared.p1,shared.p2);
+    //Distance between points of possible new shared edge of T1 and T2
+    int d2 = euclid_dist(new_edge.p1,new_edge.p2);
+    //If new shared edge has a shorter distance between its points than the current shared edge
+    if(d2 < d1){
+        int sign1 = sign_of(signed_fast_distance(new_edge, shared.p1));
+        int sign2 = sign_of(signed_fast_distance(new_edge, shared.p2));
+        //If both points of the current shared edge are on opposite sides of the possible new shared edge
+        if(sign1 != sign2 && sign1 != 0 && sign2 != 0){
+            //Then replace the current shared edge with the new shared edge
+            global.triangles_restructured++;
+            triangle new_T1(new_edge.p1,new_edge.p2,shared.p1);
+            triangle new_T2(new_edge.p1,new_edge.p2,shared.p2);
+            std::vector<triangle> new_triangles;
+            new_triangles.push_back(new_T1);
+            new_triangles.push_back(new_T2);
+            return new_triangles;
+        }
+    }
+    //Otherwise keep original shared edge
+    std::vector<triangle> no_change;
+    //no_change.push_back(T1);
+    //no_change.push_back(T2);
+    return no_change;
+}
+//Clean up triangulation to approximate a minimum-weight triangulation
+void clean_up(){
+    //Find 2 triangles that share an edge
+    for(int i=0;i<global.trisection.size();i++){
+        for(int j=0;j<global.trisection.size();j++){
+            if(in_triangle(global.trisection[i].e1,global.trisection[j])){
+                edge shared = global.trisection[i].e1; //Shared edge
+                triangle T1 = global.trisection[i];triangle T2 = global.trisection[j];//Triangles with shared edge
+                //Replace current shared edge with minimum weight shared edge 
+                std::vector<triangle> new_triangles = minimum_weight(shared,T1,T2);
+                if(new_triangles.size()>1){
+                    global.trisection[i] = new_triangles[0];
+                    global.trisection[j] = new_triangles[1];
+                    //std::this_thread::sleep_for(std::chrono::milliseconds(global.busysleep));
+                    //done = true;
+                    //break;
+                }
+            }
+            else if(in_triangle(global.trisection[i].e2,global.trisection[j])){
+                edge shared = global.trisection[i].e2; //Shared edge
+                triangle T1 = global.trisection[i];triangle T2 = global.trisection[j];//Triangles with shared edge
+                //Replace current shared edge with minimum weight shared edge
+                std::vector<triangle> new_triangles = minimum_weight(shared,T1,T2);
+                if(new_triangles.size()>1){
+                    global.trisection[i] = new_triangles[0];
+                    global.trisection[j] = new_triangles[1];
+                    //std::this_thread::sleep_for(std::chrono::milliseconds(global.busysleep));
+                    //done = true;
+                    //break;
+                }
+            }
+            else if(in_triangle(global.trisection[i].e3,global.trisection[j])){
+                edge shared = global.trisection[i].e3; //Shared edge
+                triangle T1 = global.trisection[i];triangle T2 = global.trisection[j];//Triangles with shared edge
+                //Replace current shared edge with minimum weight shared edge
+                std::vector<triangle> new_triangles = minimum_weight(shared,T1,T2);
+                if(new_triangles.size()>1){
+                    global.trisection[i] = new_triangles[0];
+                    global.trisection[j] = new_triangles[1];
+                    //std::this_thread::sleep_for(std::chrono::milliseconds(global.busysleep));
+                    //done = true;
+                    //break;
+                }
+            }
+        }
+    }
+    
+    
+}
+
+void vertex_lattice(int N){
+    GLint x_spacing = (global.screen_width/N);
+    GLint y_spacing = (global.screen_height/N);
+    for(int i=1;i<=N;i++){
+        for(int j=1;j<=N;j++){
+            point P;
+            P.x = x_spacing*i;
+            P.y = y_spacing*j;
+            global.vertices.push_back(P);
+        }
+    }
+}
 
 //Remove all vertices and convex hull edges from screen
 void reset(){
@@ -391,12 +577,17 @@ void reset(){
     for(triangle t:global.trisection){
         global.trisection.pop_back();
     }
+    global.triangles_restructured = 0;
     glutPostRedisplay();
 }
 //Print results of the triangulation to the terminal
 void print_results(){
+    for(edge e:global.convex_hull){
+        std::cout<<"Edge: ("<<e.p1.x<<","<<e.p1.y<<"),("<<e.p2.x<<","<<e.p2.y<<")"<<std::endl;
+    }
     std::cout<<std::endl<<"Number of vertices: "<<global.vertices.size()<<std::endl;
     std::cout<<"Number of triangles: "<<global.trisection.size()<<std::endl;
+    std::cout<<"Number of triangles restructured: "<<global.triangles_restructured<<std::endl;
 }
 
 //Glut keyboard function to handle keyboard inputs
@@ -416,6 +607,14 @@ void keyboard(unsigned char key, int x, int y){
         case 'M':
             if (!global.pressedM){glutMouseFunc(add_chosen); global.pressedM = true;}
             else {glutMouseFunc(do_nothing); global.pressedM = false;}
+            break;
+        case 't':
+        case 'T':
+            if(global.vertices.size() > 0){
+                triangulation();
+                clean_up();
+                print_results();
+            }
             break;
     }
 }
@@ -440,8 +639,37 @@ void menu_func(int value){
         case MENU_TRIANGULATE:
             if(global.vertices.size() > 0){
                 triangulation();
+                glutPostRedisplay();
                 print_results();
             }
+            break;
+        case MENU_CLEANUP:
+            if(global.trisection.size() > 0){
+                clean_up();
+                glutPostRedisplay();
+                print_results();
+            }
+            break;
+        case MENU_LATTICE:
+            int N;
+            std::cout<<"Enter N <= 50 for size of NxN lattice: ";
+            std::cin>>N;
+            if(std::cin.fail()){
+                std::cerr<<"Value must be an integer. Using default value of N = 20"<<std::endl;
+                std::cin.clear();
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                vertex_lattice(20);
+            }
+            else if(N > 50){
+                std::cerr<<"Value N must be less than 51. Using default value of N = 20"<<std::endl;
+                std::cin.clear();
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                vertex_lattice(20);
+            }
+            else{
+                vertex_lattice(N);
+            }
+            glutPostRedisplay();
             break;
     }
 }
@@ -451,7 +679,9 @@ void create_menu(){
     int main_menu = glutCreateMenu(&menu_func);
     glutAddMenuEntry("Generate n random vertices", MENU_RAND);
     glutAddMenuEntry("Add 100 random vertices", MENU_ADD_100);
+    glutAddMenuEntry("Create NxN lattice of vertices", MENU_LATTICE);
     glutAddMenuEntry("Triangulation",MENU_TRIANGULATE);
+    glutAddMenuEntry("Clean Up",MENU_CLEANUP);
     glutAddMenuEntry("Reset",MENU_RESET);
     glutAddMenuEntry("Quit", MENU_QUIT);
     glutAttachMenu(GLUT_RIGHT_BUTTON);
@@ -459,6 +689,8 @@ void create_menu(){
 //Prints the key and its function to the terminal
 void key_commands(){
     std::cout<<"R = Generate n random vertices"<<std::endl;
+    std::cout<<"M = Add vertices with mouse clicks"<<std::endl;
+    std::cout<<"T = Triangulate"<<std::endl;
     std::cout<<"Q = Quit"<<std::endl;
 }
 
